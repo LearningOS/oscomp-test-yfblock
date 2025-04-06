@@ -44,7 +44,7 @@ jobs:
         with:
           qemu-version: ${{ env.qemu-version }}
       - name: Build python environment
-        run: sudo apt-get install -y python3 python3-pip yq
+        run: sudo apt-get install -y python3 python3-pip yq jq
       # - name: build os.bin
       #   run: |
       #     touch riscv64_output.txt

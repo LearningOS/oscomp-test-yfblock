@@ -80,13 +80,25 @@ pub async fn initproc() {
     // command("busybox sh netperf_testcode.sh").await;
 
     // command("busybox echo run busybox_testcode.sh").await;
-    // command("busybox sh busybox_testcode.sh").await;
+    println!("#### OS COMP TEST GROUP START busybox-glibc ####");
+    println!("#### OS COMP TEST GROUP START busybox-musl ####");
+    command("busybox sh busybox_testcode.sh").await;
+    println!("#### OS COMP TEST GROUP END busybox-musl ####");
+    println!("#### OS COMP TEST GROUP END busybox-glibc ####");
 
     // command("busybox echo run libctest_testcode.sh").await;
+    println!("#### OS COMP TEST GROUP START libctest-glibc ####");
+    println!("#### OS COMP TEST GROUP START libctest-musl ####");
     command("busybox sh libctest_testcode.sh").await;
+    println!("#### OS COMP TEST GROUP END libctest-musl ####");
+    println!("#### OS COMP TEST GROUP END libctest-glibc ####");
 
     // command("busybox echo run lua_testcode.sh").await;
-    // command("busybox sh lua_testcode.sh").await;
+    println!("#### OS COMP TEST GROUP START lua-glibc ####");
+    println!("#### OS COMP TEST GROUP START lua-musl ####");
+    command("busybox sh lua_testcode.sh").await;
+    println!("#### OS COMP TEST GROUP END lua-musl ####");
+    println!("#### OS COMP TEST GROUP END lua-glibc ####");
 
     // command("busybox echo run cyclic_testcode.sh").await;
     // command("busybox sh cyclictest_testcode.sh").await;

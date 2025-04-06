@@ -78,7 +78,9 @@ jobs:
       - name: build os.bin
         run: |
           touch output.txt
+          echo 'start---riscv64' > output.txt
           make PLATFORM=riscv64-qemu LOG=error run >> output.txt || true
+          echo 'end---riscv64' >> output.txt
           cat output.txt
           
       - name: Download EvaluationScript

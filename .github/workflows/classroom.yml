@@ -64,7 +64,7 @@ jobs:
           echo 'end---loongarch64' >> loongarch64_output.txt
           make PLATFORM=aarch64-qemu LOG=error run >> aarch64_output.txt || true
           echo 'end---aarch64' >> aarch64_output.txt
-          make PLATFORM=x86_64-qemu LOG=error run >> x86_64_output.txt || true
+          make PLATFORM=x86_64-qemu LOG=error NET=on run >> x86_64_output.txt || true
           echo 'end---x86_64' >> x86_64_output.txt
           touch output.txt
           cat riscv64_output.txt >> output.txt

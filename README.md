@@ -1,39 +1,116 @@
-# oscomp kernel training
-**2025年开源操作系统训练营 oskernel训练**
+# ByteOS
 
-## 训练邀请：OS kernel设计与实现
-- [点击：创建自己的内核赛道训练repo](https://classroom.github.com/a/END-WGn8)
-- [点击：查看在线榜单](http://learningos.cn/oscomptest-grading)
+## How to use this project
 
-本测试涵盖riscv64、loongarch64、aarch64、x86_64四种架构测例，测例内容基本一致。
+Install build package.
 
-**注：**
-1. **基于Github Classroom，具有在线编程，在线自动评测，在线显示排行榜的特征**
-2. **没学过git/github使用、C/Rust语言、基本数据结构和算法、操作系统和与RISC-V相关的组成原理课程的同学，建议先补一下相关知识**
+```shell
+cargo install --git https://github.com/Byte-OS/cargo-byteos
+```
 
-## 内核赛道OS训练repo说明
+Run with make file.
 
-> 目前支持对2025年全国大学生OS比赛内核赛道的Linux Apps测例的测试，采用形式与比赛大致相同，但是请注意评测流中的运行方式与本地starry-next基本一致，你无需修改现有starry-next的makefile配置。
+```shell
+# riscv64
+make PLATFORM=riscv64-qemu run
+# aarch64
+make PLATFORM=aarch64-qemu run
+# x86_64
+make PLATFORM=x86_64-qemu run
+# loongarch64
+make PLATFORM=loongarch64-qemu run
+```
 
-目前已经支持 `basic`,`libc-test`，`busybox`, `lua`, `iozone` 相关Linux App测例，并且需要分别支持`musl`、`glibc`，测试过程无人工干预，需要由内核自动运行，所有测例文件放在镜像中，内核需要支持 `ext4` 文件系统来读取文件。
+You can find available modules using the following command.
 
-## 本地测试
+```shell
+byteos patch list
 
-如你写好OS后，想在在本地测试，可以参考现有starry-next的[Readme](https://github.com/oscomp/starry-next)，这也是你的训练基础OS。
+# Download and patch in Cargo.toml
+byteos patch add arch
 
-## 在线测试
-github的CI对内核进行测试的执行时间设置为 `300` 秒（`5`分钟），超时后程序会被终止，不再继续执行，所得分数为超时前完成的部分的分数。
-github的CI执行完毕后，你可以在相应仓库的action中查看详细结果。
-github的CI测试可能会有脚本执行的权限问题，如果添加`chmod +x`后没有解决，可以尝试使用`git update-index --chmod=+x build.cmd`。
+# remove patch and delete folder
+byteos patch remove arch
+```
 
-## 注意事项
-- `QEMU` 版本为 `9.2.1`
-- `RUST ToolChain` 版本为 `nightly-2025-01-18`
-- 编译目标架构为随测试架构不同而变化
-- 内核执行时间为 `5` 分钟
-- 只有 `main` 分支的提交可以被Github 上的CI评测机处理
-- Github 上的CI评测机在初次运行时需要编译 `qemu`，可能需要花费一些时间，请耐心等待
-- 如果在实践中碰到问题，请在本repo的 `issues` 栏中发帖子
-- 如果有进一步的改进，请给本repo提 `Pull requests`
-- 此外，评测时您需要在您想要测试测例类型的前后输出例如＂#### OS COMP TEST GROUP START basic-musl ####＂和＂#### OS COMP TEST GROUP END basic-musl ####＂，这样您才能获得相应评测分数。
+## byteos.yaml
 
+> byteos.yaml is a configuration file for the ByteOS.
+
+You can change the config in this file. For example, you want to use the ext4 fielsystem.
+
+Set the root_fs to 'ext4' or 'ext4_rs' will change the root_fs from 'fat32' to 'ext4'.
+
+The 'ext4' and 'ext4_rs' are the different implementation of the ext4.
+
+TIPS: Make ensure that the mkefs version of your system lower than 1.70. If not, you have to use another argument to build the ext4 image.
+
+## Kernel struct Design
+
+> ByteOS is a posix-compatible kernel.
+>
+> If you are interested in this project, please contact me.
+>
+> email: <321353225@qq.com>  qq: 321353225
+
+```plain
+crates --> arch --> modules --> kernel
+```
+
+## TODO List
+
+- [x] higher half kernel
+- [x] Modular skeleton
+- [x] global allocator
+- [x] RTC device support
+- [x] Timestamp --> actual Date/Time [timestamp crate](crates/timestamp/)
+- [x] frame allocator, use bit_field to store page usage
+- [x] Interrupt support
+- [x] backtrace support
+- [x] timer interrupt support
+- [x] page mapping support
+- [x] get devices info and memory info from device_tree
+- [x] VIRTIO blk device support
+- [x] Add a banner for os. use tool [banner generation tool](http://patorjk.com/software/taag/#p=display&f=Big&t=ByteOS)
+- [x] vfs support
+- [x] fatfs support
+- [x] fs mount support (a temporary solution)
+- [x] ramfs support
+- [x] devfs support
+- [x] async/await support (simple version)
+- [x] process support
+- [x] VIRTIO net device support
+- [ ] smp support
+- [ ] desktop support. eg: dwm, hyprland.
+
+## Program support
+
+tools/final2023:
+
+- libctest
+- libcbench
+- busybox
+- lua
+- lmbench
+- iozone
+- iperf3
+- nerperf
+- cyclic
+- unixbench
+
+tools/gcc
+
+- gcc
+- redis-server
+- ssh-simple
+- http-server
+
+You can change the `TESTCASE` in the makefile to change the target. You can run other program in the sh or change the default program in the `kernel/src/tasks/initproc.rs` file.
+
+## run busybox sh on qemu platform
+
+```bash
+make run BOARD=qemu LOG=info NET=off
+```
+
+Changing 'LOG=info' to 'LOG=error' if you don't need any info output.

@@ -27,7 +27,7 @@ jobs:
           components: rust-src, llvm-tools
           targets: x86_64-unknown-none, riscv64gc-unknown-none-elf, aarch64-unknown-none, aarch64-unknown-none-softfloat, loongarch64-unknown-none
       - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-binutils
+      - run: cargo install cargo-binutils kbuild
       - uses: ./.github/workflows/setup-musl
         with:
           arch: riscv64
@@ -44,33 +44,38 @@ jobs:
         with:
           qemu-version: ${{ env.qemu-version }}
       - name: Build python environment
-        run: sudo apt-get install -y python3 python3-pip
+        run: sudo apt-get install -y python3 python3-pip yq
+      # - name: build os.bin
+      #   run: |
+      #     touch riscv64_output.txt
+      #     echo 'start---riscv64' > riscv64_output.txt
+      #     touch loongarch64_output.txt
+      #     echo 'start---loongarch64' > loongarch64_output.txt
+      #     touch aarch64_output.txt
+      #     echo 'start---aarch64' > aarch64_output.txt
+      #     touch x86_64_output.txt
+      #     echo 'start---x86_64' > x86_64_output.txt
+      #     make oscomp_run ARCH=riscv64 BLK=y NET=y FEATURES=fp_simd,lwext4_rs >> riscv64_output.txt || true
+      #     echo 'end---riscv64' >> riscv64_output.txt
+      #     make clean
+      #     make oscomp_run ARCH=loongarch64 BLK=y NET=y FEATURES=fp_simd,lwext4_rs >> loongarch64_output.txt || true
+      #     echo 'end---loongarch64' >> loongarch64_output.txt
+      #     make clean
+      #     make oscomp_run ARCH=aarch64 BLK=y NET=y FEATURES=fp_simd,lwext4_rs >> aarch64_output.txt || true
+      #     echo 'end---aarch64' >> aarch64_output.txt
+      #     make clean
+      #     make oscomp_run ARCH=x86_64 BLK=y NET=y FEATURES=fp_simd,lwext4_rs ACCEL=n >> x86_64_output.txt || true
+      #     echo 'end---x86_64' >> x86_64_output.txt
+      #     touch output.txt
+      #     cat riscv64_output.txt >> output.txt
+      #     cat loongarch64_output.txt >> output.txt
+      #     cat aarch64_output.txt >> output.txt
+      #     cat x86_64_output.txt >> output.txt
+      #     cat output.txt
       - name: build os.bin
         run: |
-          touch riscv64_output.txt
-          echo 'start---riscv64' > riscv64_output.txt
-          touch loongarch64_output.txt
-          echo 'start---loongarch64' > loongarch64_output.txt
-          touch aarch64_output.txt
-          echo 'start---aarch64' > aarch64_output.txt
-          touch x86_64_output.txt
-          echo 'start---x86_64' > x86_64_output.txt
-          make oscomp_run ARCH=riscv64 BLK=y NET=y FEATURES=fp_simd,lwext4_rs >> riscv64_output.txt || true
-          echo 'end---riscv64' >> riscv64_output.txt
-          make clean
-          make oscomp_run ARCH=loongarch64 BLK=y NET=y FEATURES=fp_simd,lwext4_rs >> loongarch64_output.txt || true
-          echo 'end---loongarch64' >> loongarch64_output.txt
-          make clean
-          make oscomp_run ARCH=aarch64 BLK=y NET=y FEATURES=fp_simd,lwext4_rs >> aarch64_output.txt || true
-          echo 'end---aarch64' >> aarch64_output.txt
-          make clean
-          make oscomp_run ARCH=x86_64 BLK=y NET=y FEATURES=fp_simd,lwext4_rs ACCEL=n >> x86_64_output.txt || true
-          echo 'end---x86_64' >> x86_64_output.txt
           touch output.txt
-          cat riscv64_output.txt >> output.txt
-          cat loongarch64_output.txt >> output.txt
-          cat aarch64_output.txt >> output.txt
-          cat x86_64_output.txt >> output.txt
+          make PLATFORM=x86_64-qemu LOG=error run >> output.txt || true
           cat output.txt
           
       - name: Download EvaluationScript

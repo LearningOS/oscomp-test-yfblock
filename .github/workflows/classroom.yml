@@ -50,27 +50,23 @@ jobs:
           sudo chmod +x /usr/bin/yq
       - name: build os.bin
         run: |
-          touch riscv64_output.txt
-          echo 'start---riscv64' > riscv64_output.txt
-          touch loongarch64_output.txt
-          echo 'start---loongarch64' > loongarch64_output.txt
-          touch aarch64_output.txt
-          echo 'start---aarch64' > aarch64_output.txt
-          touch x86_64_output.txt
-          echo 'start---x86_64' > x86_64_output.txt
-          make PLATFORM=riscv64-qemu LOG=error run >> riscv64_output.txt || true
-          echo 'end---riscv64' >> riscv64_output.txt
-          make PLATFORM=loongarch64-qemu LOG=error run >> loongarch64_output.txt || true
-          echo 'end---loongarch64' >> loongarch64_output.txt
-          make PLATFORM=aarch64-qemu LOG=error run >> aarch64_output.txt || true
-          echo 'end---aarch64' >> aarch64_output.txt
-          make PLATFORM=x86_64-qemu LOG=error NET=on run >> x86_64_output.txt || true
-          echo 'end---x86_64' >> x86_64_output.txt
           touch output.txt
-          cat riscv64_output.txt >> output.txt
-          cat loongarch64_output.txt >> output.txt
-          cat aarch64_output.txt >> output.txt
-          cat x86_64_output.txt >> output.txt
+          echo 'start---riscv64' >> output.txt
+          make PLATFORM=riscv64-qemu LOG=error run >> output.txt || true
+          echo 'end---riscv64' >> output.txt
+
+          echo 'start---aarch64' >> output.txt
+          make PLATFORM=aarch64-qemu LOG=error run >> output.txt || true
+          echo 'end---aarch64' >> output.txt
+
+          echo 'start---loongarch64' >> output.txt
+          make PLATFORM=loongarch64-qemu LOG=error run >> output.txt || true
+          echo 'end---loongarch64' >> output.txt
+
+          echo 'start---x86_64' >> output.txt
+          make PLATFORM=x86_64-qemu LOG=error run >> output.txt || true
+          echo 'end---x86_64' >> output.txt
+
           cat output.txt
           
       - name: Download EvaluationScript

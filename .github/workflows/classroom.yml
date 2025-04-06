@@ -80,19 +80,19 @@ jobs:
           touch riscv64_output.txt
           make PLATFORM=riscv64-qemu LOG=error run >> riscv64_output.txt || true
           touch output.txt
-          echo 'start---riscv64' > output.txt
+          echo 'start---riscv64' >> output.txt
           cat riscv64_output.txt >> output.txt
           echo 'end---riscv64' >> output.txt
 
-          echo 'start---aarch64' > output.txt
+          echo 'start---aarch64' >> output.txt
           cat riscv64_output.txt >> output.txt
           echo 'end---aarch64' >> output.txt
 
-          echo 'start---loongarch64' > output.txt
+          echo 'start---loongarch64' >> output.txt
           cat riscv64_output.txt >> output.txt
           echo 'end---loongarch64' >> output.txt
 
-          echo 'start---x86_64' > output.txt
+          echo 'start---x86_64' >> output.txt
           cat riscv64_output.txt >> output.txt
           echo 'end---x86_64' >> output.txt
 

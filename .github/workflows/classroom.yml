@@ -64,7 +64,7 @@ jobs:
           echo 'end---loongarch64' >> output.txt
 
           echo 'start---x86_64' >> output.txt
-          make PLATFORM=x86_64-qemu LOG=error run >> output.txt || true
+          make PLATFORM=x86_64-qemu LOG=error NET=on run >> output.txt || true
           echo 'end---x86_64' >> output.txt
 
           cat output.txt

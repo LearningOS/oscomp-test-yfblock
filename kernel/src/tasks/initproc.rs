@@ -6,10 +6,7 @@ use alloc::{
 };
 use devices::utils::get_char;
 use executor::{current_task, release_task, task::TaskType, tid2task, yield_now, TASK_MAP};
-use fs::{
-    dentry::{dentry_open, dentry_root, DentryNode},
-    get_filesystem, File, FileType, OpenFlags,
-};
+use fs::{file::File, FileType, OpenFlags};
 use log::debug;
 use polyhal::{debug_console::DebugConsole, instruction::shutdown};
 use vfscore::INodeInterface;
@@ -46,7 +43,7 @@ async fn command(cmd: &str) {
         true => String::from(filename),
         false => String::from("/") + filename,
     };
-    match dentry_open(dentry_root(), &filename, OpenFlags::O_RDONLY) {
+    match File::open(&filename, OpenFlags::O_RDONLY) {
         Ok(_) => {
             info!("exec: {}", filename);
             let mut args_extend = vec![filename.as_str()];
@@ -73,8 +70,16 @@ async fn command(cmd: &str) {
 
 pub async fn initproc() {
     println!("start kernel tasks");
+    // command("./runtest.exe -w entry-dynamic.exe argv").await;
+    // command("./entry-dynamic.exe argv").await;
     // command("busybox echo run time-test").await;
     // command("time-test").await;
+
+    println!("#### OS COMP TEST GROUP START basic-glibc ####");
+    println!("#### OS COMP TEST GROUP START basic-musl ####");
+    command("busybox sh basic/run-all.sh").await;
+    println!("#### OS COMP TEST GROUP END basic-musl ####");
+    println!("#### OS COMP TEST GROUP END basic-glibc ####");
 
     // command("busybox echo run netperf_testcode.sh").await;
     // command("busybox sh netperf_testcode.sh").await;
@@ -99,6 +104,9 @@ pub async fn initproc() {
     command("busybox sh lua_testcode.sh").await;
     println!("#### OS COMP TEST GROUP END lua-musl ####");
     println!("#### OS COMP TEST GROUP END lua-glibc ####");
+    // command("busybox init").await;
+    // command("busybox sh").await;
+    // command("busybox sh init.sh").await;
 
     // command("busybox echo run cyclic_testcode.sh").await;
     // command("busybox sh cyclictest_testcode.sh").await;
@@ -111,7 +119,11 @@ pub async fn initproc() {
     // kill_all_tasks().await;
 
     // command("busybox echo run iozone_testcode.sh").await;
-    // command("busybox sh iozone_testcode.sh").await;
+    println!("#### OS COMP TEST GROUP START iozone-glibc ####");
+    println!("#### OS COMP TEST GROUP START iozone-musl ####");
+    command("busybox sh iozone_testcode.sh").await;
+    println!("#### OS COMP TEST GROUP END iozone-musl ####");
+    println!("#### OS COMP TEST GROUP END iozone-glibc ####");
 
     // command("busybox echo run lmbench_testcode.sh").await;
     // command("busybox sh lmbench_testcode.sh").await;

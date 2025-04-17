@@ -16,6 +16,8 @@ extern crate bitflags;
 extern crate log;
 #[macro_use]
 extern crate polyhal;
+#[macro_use]
+extern crate cfg_if;
 
 extern crate polyhal_boot;
 extern crate polyhal_trap;
@@ -24,7 +26,6 @@ extern crate polyhal_trap;
 mod logging;
 
 mod consts;
-mod epoll;
 mod panic;
 mod socket;
 mod syscall;
@@ -32,11 +33,12 @@ mod tasks;
 mod user;
 mod utils;
 
-use crate::tasks::{current_user_task, FileItem};
+use crate::tasks::current_user_task;
 use crate::user::task_ilegal;
 use core::hint::spin_loop;
 use devices::{self, get_int_device, PAGE_SIZE, VIRT_ADDR_START};
 use executor::current_task;
+use fs::file::File;
 use polyhal::common::PageAlloc;
 use polyhal::irq::IRQ;
 use polyhal::mem::{get_fdt, get_mem_areas};
@@ -182,7 +184,7 @@ fn main(hart_id: usize) {
     // initialize filesystem
     fs::init();
     {
-        FileItem::fs_open("/var", OpenFlags::O_DIRECTORY)
+        File::open("/var", OpenFlags::O_DIRECTORY)
             .expect("can't open /var")
             .mkdir("tmp")
             .expect("can't create tmp dir");
@@ -205,17 +207,12 @@ fn main(hart_id: usize) {
     IRQ::int_enable();
 
     // cache task with task templates
-    // crate::syscall::cache_task_template("/bin/busybox").expect("can't cache task");
-    // crate::syscall::cache_task_template("./busybox").expect("can't cache task");
-    // crate::syscall::cache_task_template("busybox").expect("can't cache task");
-    // crate::syscall::cache_task_template("./runtest.exe").expect("can't cache task");
-    // crate::syscall::cache_task_template("entry-static.exe").expect("can't cache task");
-    // crate::syscall::cache_task_template("libc.so").expect("can't cache task");
-    // crate::syscall::cache_task_template("lmbench_all").expect("can't cache task");
-
-    // loop {
-    //     info!("3");
-    // }
+    // tasks::exec::cache_task_template("./busybox").expect("can't cache task");
+    // tasks::exec::cache_task_template("./runtest.exe").expect("can't cache task");
+    // tasks::exec::cache_task_template("entry-static.exe").expect("can't cache task");
+    // tasks::exec::cache_task_template("libc.so").expect("can't cache task");
+    // tasks::exec::cache_task_template("./lua").expect("can't cache task");
+    // tasks::exec::cache_task_template("lmbench_all").expect("can't cache task");
 
     // init kernel threads and async executor
     tasks::init();

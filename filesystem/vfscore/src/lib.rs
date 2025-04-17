@@ -1,17 +1,24 @@
 #![no_std]
-
 extern crate alloc;
+
+#[macro_use]
+extern crate bitflags;
 
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use downcast_rs::{impl_downcast, DowncastSync};
+use syscalls::Errno;
 
-bitflags::bitflags! {
+#[cfg(any(
+    target_arch = "riscv64",
+    target_arch = "loongarch64",
+    target_arch = "x86_64"
+))]
+bitflags! {
     #[derive(Debug, Clone)]
     pub struct OpenFlags: usize {
         // reserve 3 bits for the access mode
-        const NONE          = 0;
         const O_RDONLY      = 0;
         const O_WRONLY      = 1;
         const O_RDWR        = 2;
@@ -38,6 +45,37 @@ bitflags::bitflags! {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+bitflags! {
+    #[derive(Debug, Clone)]
+    pub struct OpenFlags: usize {
+        // reserve 3 bits for the access mode
+        const O_RDONLY      = 0;
+        const O_WRONLY      = 1;
+        const O_RDWR        = 2;
+        const O_ACCMODE     = 3;
+        const O_CREAT       = 0o100;
+        const O_EXCL        = 0o200;
+        const O_NOCTTY      = 0o400;
+        const O_TRUNC       = 0o1000;
+        const O_APPEND      = 0o2000;
+        const O_NONBLOCK    = 0o4000;
+        const O_DSYNC       = 0o10000;
+        const O_SYNC        = 0o4010000;
+        const O_RSYNC       = 0o4010000;
+        const O_DIRECTORY   = 0o40000;
+        const O_NOFOLLOW    = 0o100000;
+        const O_CLOEXEC     = 0o2000000;
+
+        const O_ASYNC       = 0o20000;
+        const O_DIRECT      = 0o200000;
+        const O_LARGEFILE   = 0o400000;
+        const O_NOATIME     = 0o1000000;
+        const O_PATH        = 0o10000000;
+        const O_TMPFILE     = 0o20040000;
+    }
+}
+
 bitflags::bitflags! {
     pub struct MMapFlags: usize {
         const MAP_PRIVATE = 0x1;
@@ -46,7 +84,7 @@ bitflags::bitflags! {
         const MAP_ANONYOMUS = 0x8;
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub struct StatMode: u32 {
         const NULL  = 0;
         /// Type
@@ -121,27 +159,6 @@ bitflags::bitflags! {
 pub const UTIME_NOW: usize = 0x3fffffff;
 pub const UTIME_OMIT: usize = 0x3ffffffe;
 
-#[derive(Debug, Clone, Copy)]
-pub enum VfsError {
-    NotLinkFile,
-    NotDir,
-    NotFile,
-    NotSupported,
-    FileNotFound,
-    AlreadyExists,
-    InvalidData,
-    DirectoryNotEmpty,
-    InvalidInput,
-    StorageFull,
-    UnexpectedEof,
-    WriteZero,
-    Io,
-    Blocking,
-    NoMountedPoint,
-    NotAPipe,
-    NotWriteable,
-}
-
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum FileType {
     File,
@@ -158,15 +175,6 @@ pub enum SeekFrom {
     END(isize),
 }
 
-#[derive(Debug, Clone)]
-pub struct Metadata<'a> {
-    pub filename: &'a str,
-    pub inode: usize,
-    pub file_type: FileType,
-    pub size: usize,
-    pub childrens: usize,
-}
-
 pub struct DirEntry {
     pub filename: String,
     pub len: usize,
@@ -174,14 +182,14 @@ pub struct DirEntry {
 }
 
 pub trait FileSystem: Send + Sync {
-    fn root_dir(&'static self) -> Arc<dyn INodeInterface>;
+    fn root_dir(&self) -> Arc<dyn INodeInterface>;
     fn name(&self) -> &str;
     fn flush(&self) -> VfsResult<()> {
-        Err(VfsError::FileNotFound)
+        Ok(())
     }
 }
 
-pub type VfsResult<T> = core::result::Result<T, VfsError>;
+pub type VfsResult<T> = core::result::Result<T, Errno>;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug)]
@@ -197,7 +205,7 @@ impl TimeSpec {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[cfg(not(target_arch = "x86_64"))]
 pub struct Stat {
     pub dev: u64,        // 设备号
@@ -218,7 +226,7 @@ pub struct Stat {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[cfg(target_arch = "x86_64")]
 pub struct Stat {
     pub dev: u64,       // 设备号
@@ -269,96 +277,88 @@ pub struct PollFd {
 }
 
 pub trait INodeInterface: DowncastSync + Send + Sync {
-    fn metadata(&self) -> VfsResult<Metadata> {
-        Err(VfsError::NotSupported)
-    }
-
     fn readat(&self, _offset: usize, _buffer: &mut [u8]) -> VfsResult<usize> {
-        Err(VfsError::NotFile)
+        Err(Errno::ENOENT)
     }
 
     fn writeat(&self, _offset: usize, _buffer: &[u8]) -> VfsResult<usize> {
-        Err(VfsError::NotFile)
+        Err(Errno::ENOENT)
     }
 
-    fn mkdir(&self, _name: &str) -> VfsResult<Arc<dyn INodeInterface>> {
-        Err(VfsError::NotDir)
+    fn create(&self, _name: &str, _ty: FileType) -> VfsResult<()> {
+        Err(Errno::ENOTDIR)
+    }
+
+    fn mkdir(&self, _name: &str) -> VfsResult<()> {
+        Err(Errno::EEXIST)
     }
 
     fn rmdir(&self, _name: &str) -> VfsResult<()> {
-        Err(VfsError::NotDir)
+        Err(Errno::ENOENT)
     }
 
     fn remove(&self, _name: &str) -> VfsResult<()> {
-        Err(VfsError::NotDir)
-    }
-
-    fn touch(&self, _name: &str) -> VfsResult<Arc<dyn INodeInterface>> {
-        Err(VfsError::NotDir)
+        Err(Errno::ENOENT)
     }
 
     fn read_dir(&self) -> VfsResult<Vec<DirEntry>> {
-        Err(VfsError::NotDir)
+        Err(Errno::EPERM)
     }
 
     fn lookup(&self, _name: &str) -> VfsResult<Arc<dyn INodeInterface>> {
-        Err(VfsError::NotDir)
-    }
-
-    fn open(&self, _name: &str, _flags: OpenFlags) -> VfsResult<Arc<dyn INodeInterface>> {
-        Err(VfsError::NotDir)
+        Err(Errno::ENOENT)
     }
 
     fn ioctl(&self, _command: usize, _arg: usize) -> VfsResult<usize> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn truncate(&self, _size: usize) -> VfsResult<()> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn flush(&self) -> VfsResult<()> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn resolve_link(&self) -> VfsResult<String> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn link(&self, _name: &str, _src: Arc<dyn INodeInterface>) -> VfsResult<()> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn sym_link(&self, _name: &str, _src: &str) -> VfsResult<()> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn unlink(&self, _name: &str) -> VfsResult<()> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn stat(&self, _stat: &mut Stat) -> VfsResult<()> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn mount(&self, _path: &str) -> VfsResult<()> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn umount(&self) -> VfsResult<()> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn statfs(&self, _statfs: &mut StatFS) -> VfsResult<()> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn utimes(&self, _times: &mut [TimeSpec]) -> VfsResult<()> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 
     fn poll(&self, _events: PollEvent) -> VfsResult<PollEvent> {
-        Err(VfsError::NotSupported)
+        Err(Errno::EPERM)
     }
 }
 

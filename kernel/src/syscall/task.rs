@@ -1,351 +1,42 @@
+use super::{types::sys::Rusage, SysResult};
 use crate::{
     syscall::{
-        consts::{current_nsec, from_vfs, CloneFlags, Rusage, TimeVal},
         time::WaitUntilsec,
+        types::{
+            fd::{FutexFlags, AT_CWD},
+            task::CloneFlags,
+            time::TimeVal,
+        },
     },
-    tasks::{
-        elf::{init_task_stack, ElfExtra},
-        futex_requeue, futex_wake, FileItem, MapTrack, MemArea, MemType, UserTask, WaitFutex,
-        WaitPid,
-    },
+    tasks::{exec::exec_with_process, futex_requeue, futex_wake, UserTask, WaitFutex, WaitPid},
     user::{entry::user_entry, UserTaskContainer},
+    utils::{time::current_nsec, useref::UserRef},
 };
 use alloc::{
     string::{String, ToString},
+    sync::Arc,
     sync::Weak,
     vec::Vec,
-    {boxed::Box, sync::Arc},
 };
-use async_recursion::async_recursion;
 use core::cmp;
-use core::ops::Add;
-use devices::PAGE_SIZE;
 use executor::{select, thread, tid2task, yield_now, AsyncTask};
-use fs::dentry::{dentry_open, dentry_root};
 use fs::TimeSpec;
 use log::{debug, warn};
 use num_traits::FromPrimitive;
-use polyhal::{va, MappingFlags, Time, VirtAddr};
+use polyhal::Time;
 use polyhal_trap::trapframe::TrapFrameArgs;
-use runtime::frame::{frame_alloc_much, FrameTracker};
 use signal::SignalFlags;
-use sync::Mutex;
 use syscalls::Errno;
 use vfscore::OpenFlags;
-use xmas_elf::program::{SegmentData, Type};
-
-use super::consts::{FutexFlags, UserRef};
-use super::SysResult;
-
-pub struct TaskCacheTemplate {
-    name: String,
-    entry: usize,
-    maps: Vec<MemArea>,
-    base: usize,
-    heap_bottom: usize,
-    tls: usize,
-    ph_count: usize,
-    ph_entry_size: usize,
-    ph_addr: usize,
-}
-pub static TASK_CACHES: Mutex<Vec<TaskCacheTemplate>> = Mutex::new(Vec::new());
-
-#[allow(dead_code)]
-pub fn cache_task_template(path: &str) -> Result<(), Errno> {
-    let file = dentry_open(dentry_root(), path, OpenFlags::O_RDONLY)
-        .map_err(from_vfs)?
-        .node
-        .clone();
-    let file_size = file.metadata().unwrap().size;
-    let frame_paddr = frame_alloc_much(file_size.div_ceil(PAGE_SIZE));
-    let buffer = frame_paddr.as_ref().unwrap()[0]
-        .0
-        .slice_mut_with_len(file_size);
-    let rsize = file.readat(0, buffer).map_err(from_vfs)?;
-    assert_eq!(rsize, file_size);
-    // flush_dcache_range();
-    // 读取elf信息
-    if let Ok(elf) = xmas_elf::ElfFile::new(&buffer) {
-        let elf_header = elf.header;
-
-        let entry_point = elf.header.pt2.entry_point() as usize;
-        // this assert ensures that the file is elf file.
-        assert_eq!(
-            elf_header.pt1.magic,
-            [0x7f, 0x45, 0x4c, 0x46],
-            "invalid elf!"
-        );
-
-        // check if it is libc, dlopen, it needs recurit.
-        let header = elf
-            .program_iter()
-            .find(|ph| ph.get_type() == Ok(Type::Interp));
-        if let Some(_header) = header {
-            unimplemented!("can't cache dynamic file.");
-        }
-
-        // get heap_bottom, TODO: align 4096
-        // brk is expanding the data section.
-        let heap_bottom = elf.program_iter().fold(0, |acc, x| {
-            if x.virtual_addr() + x.mem_size() > acc {
-                x.virtual_addr() + x.mem_size()
-            } else {
-                acc
-            }
-        });
-
-        let tls = elf
-            .program_iter()
-            .find(|x| x.get_type().unwrap() == xmas_elf::program::Type::Tls)
-            .map(|ph| ph.virtual_addr())
-            .unwrap_or(0);
-
-        let base = 0x20000000;
-
-        let (base, relocated_arr) = match elf.relocate(base) {
-            Ok(arr) => (base, arr),
-            Err(_) => (0, vec![]),
-        };
-
-        let mut maps = Vec::new();
-
-        // map sections.
-        elf.program_iter()
-            .filter(|x| x.get_type().unwrap() == xmas_elf::program::Type::Load)
-            .for_each(|ph| {
-                let file_size = ph.file_size() as usize;
-                let mem_size = ph.mem_size() as usize;
-                let offset = ph.offset() as usize;
-                let virt_addr = base + ph.virtual_addr() as usize;
-                let vpn = virt_addr / PAGE_SIZE;
-
-                let page_count = (virt_addr + mem_size).div_ceil(PAGE_SIZE) - vpn;
-                let pages: Vec<Arc<FrameTracker>> = frame_alloc_much(page_count)
-                    .expect("can't alloc in cache task template")
-                    .into_iter()
-                    .map(|x| Arc::new(x))
-                    .collect();
-                let ppn_space = pages[0]
-                    .0
-                    .add(virt_addr % PAGE_SIZE)
-                    .slice_mut_with_len(file_size);
-
-                ppn_space.copy_from_slice(&buffer[offset..offset + file_size]);
-
-                maps.push(MemArea {
-                    mtype: MemType::CodeSection,
-                    mtrackers: pages
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, x)| MapTrack {
-                            vaddr: va!(virt_addr + i * PAGE_SIZE),
-                            tracker: x,
-                            rwx: 0,
-                        })
-                        .collect(),
-                    file: None,
-                    offset: 0,
-                    start: vpn * PAGE_SIZE,
-                    len: page_count * PAGE_SIZE,
-                })
-            });
-        if base > 0 {
-            relocated_arr.iter().for_each(|(addr, value)| unsafe {
-                let vaddr = VirtAddr::new(*addr);
-                let offset = addr % PAGE_SIZE;
-                for area in &maps {
-                    if let Some(x) = area.mtrackers.iter().find(|x| x.vaddr == vaddr) {
-                        (x.tracker.0.get_mut_ptr::<u8>().add(offset) as *mut usize)
-                            .write_volatile(*value);
-                    }
-                }
-            })
-        }
-        TASK_CACHES.lock().push(TaskCacheTemplate {
-            name: path.to_string(),
-            entry: entry_point,
-            maps,
-            base,
-            heap_bottom: heap_bottom as _,
-            tls: tls as _,
-            ph_count: elf_header.pt2.ph_count() as _,
-            ph_entry_size: elf_header.pt2.ph_entry_size() as _,
-            ph_addr: elf.get_ph_addr().unwrap_or(0) as _,
-        });
-    }
-    Ok(())
-}
-
-#[async_recursion(Sync)]
-pub async fn exec_with_process(
-    task: Arc<UserTask>,
-    path: String,
-    args: Vec<String>,
-    envp: Vec<String>,
-) -> Result<Arc<UserTask>, Errno> {
-    // copy args, avoid free before pushing.
-    let path = String::from(path);
-    let user_task = task.clone();
-    user_task.pcb.lock().memset.clear();
-    user_task.page_table.restore();
-    user_task.page_table.change();
-
-    let caches = TASK_CACHES.lock();
-    if let Some(cache_task) = caches.iter().find(|x| x.name == path) {
-        init_task_stack(
-            user_task.clone(),
-            args,
-            cache_task.base,
-            &path,
-            cache_task.entry,
-            cache_task.ph_count,
-            cache_task.ph_entry_size,
-            cache_task.ph_addr,
-            cache_task.heap_bottom,
-            cache_task.tls,
-        );
-
-        for area in &cache_task.maps {
-            user_task.inner_map(|pcb| {
-                pcb.memset
-                    .sub_area(area.start, area.start + area.len, &user_task.page_table);
-                pcb.memset.push(area.clone());
-            });
-            for mtracker in area.mtrackers.iter() {
-                user_task.map(mtracker.tracker.0, mtracker.vaddr, MappingFlags::URX);
-            }
-        }
-        Ok(user_task)
-    } else {
-        drop(caches);
-        let file = dentry_open(dentry_root(), &path, OpenFlags::O_RDONLY)
-            .map_err(from_vfs)?
-            .node
-            .clone();
-        debug!("file: {:#x?}", file.metadata().unwrap());
-        let file_size = file.metadata().unwrap().size;
-        let frame_ppn = frame_alloc_much(file_size.div_ceil(PAGE_SIZE));
-        let buffer = frame_ppn.as_ref().unwrap()[0]
-            .0
-            .slice_mut_with_len(file_size);
-        let rsize = file.readat(0, buffer).map_err(from_vfs)?;
-        assert_eq!(rsize, file_size);
-        // flush_dcache_range();
-        // 读取elf信息
-        let elf = if let Ok(elf) = xmas_elf::ElfFile::new(&buffer) {
-            elf
-        } else {
-            let mut new_args = vec!["busybox".to_string(), "sh".to_string()];
-            args.iter().for_each(|x| new_args.push(x.clone()));
-            return exec_with_process(task, String::from("busybox"), new_args, envp).await;
-        };
-        let elf_header = elf.header;
-
-        let entry_point = elf.header.pt2.entry_point() as usize;
-        // this assert ensures that the file is elf file.
-        assert_eq!(
-            elf_header.pt1.magic,
-            [0x7f, 0x45, 0x4c, 0x46],
-            "invalid elf!"
-        );
-        // WARRNING: this convert async task to user task.
-        let user_task = task.clone();
-
-        // check if it is libc, dlopen, it needs recurit.
-        let header = elf
-            .program_iter()
-            .find(|ph| ph.get_type() == Ok(Type::Interp));
-        if let Some(header) = header {
-            if let Ok(SegmentData::Undefined(_data)) = header.get_data(&elf) {
-                drop(frame_ppn);
-                let mut new_args = vec![String::from("libc.so")];
-                new_args.extend(args);
-                return exec_with_process(task, new_args[0].clone(), new_args, envp).await;
-            }
-        }
-
-        // get heap_bottom, TODO: align 4096
-        // brk is expanding the data section.
-        let heap_bottom = elf.program_iter().fold(0, |acc, x| {
-            if x.virtual_addr() + x.mem_size() > acc {
-                x.virtual_addr() + x.mem_size()
-            } else {
-                acc
-            }
-        });
-
-        let tls = elf
-            .program_iter()
-            .find(|x| x.get_type().unwrap() == xmas_elf::program::Type::Tls)
-            .map(|ph| ph.virtual_addr())
-            .unwrap_or(0);
-
-        let base = 0x20000000;
-
-        let (base, relocated_arr) = match elf.relocate(base) {
-            Ok(arr) => (base, arr),
-            Err(_) => (0, vec![]),
-        };
-        init_task_stack(
-            user_task.clone(),
-            args,
-            base,
-            &path,
-            entry_point,
-            elf_header.pt2.ph_count() as usize,
-            elf_header.pt2.ph_entry_size() as usize,
-            elf.get_ph_addr().unwrap_or(0) as usize,
-            heap_bottom as usize,
-            tls as usize,
-        );
-
-        // map sections.
-        elf.program_iter()
-            .filter(|x| x.get_type().unwrap() == xmas_elf::program::Type::Load)
-            .for_each(|ph| {
-                let file_size = ph.file_size() as usize;
-                let mem_size = ph.mem_size() as usize;
-                let offset = ph.offset() as usize;
-                let virt_addr = base + ph.virtual_addr() as usize;
-                let vpn = virt_addr / PAGE_SIZE;
-
-                let page_count = (virt_addr + mem_size).div_ceil(PAGE_SIZE) - vpn;
-                let ppn_start =
-                    user_task.frame_alloc(va!(virt_addr).floor(), MemType::CodeSection, page_count);
-                let page_space = va!(virt_addr).slice_mut_with_len(file_size);
-                let ppn_space = ppn_start
-                    .expect("not have enough memory")
-                    .add(virt_addr % PAGE_SIZE)
-                    .slice_mut_with_len(file_size);
-
-                page_space.copy_from_slice(&buffer[offset..offset + file_size]);
-                assert_eq!(ppn_space, page_space);
-                assert_eq!(&buffer[offset..offset + file_size], ppn_space);
-                assert_eq!(&buffer[offset..offset + file_size], page_space);
-            });
-
-        // relocate data
-        if base > 0 {
-            relocated_arr.into_iter().for_each(|(addr, value)| unsafe {
-                (addr as *mut usize).write_volatile(value);
-            })
-        }
-        Ok(user_task)
-    }
-}
 
 impl UserTaskContainer {
     pub async fn sys_chdir(&self, path_ptr: UserRef<i8>) -> SysResult {
         let path = path_ptr.get_cstr().map_err(|_| Errno::EINVAL)?;
         debug!("sys_chdir @ path: {}", path);
-        let now_file = self.task.pcb.lock().curr_dir.clone();
-        let new_dir = now_file
-            .dentry_open(path, OpenFlags::O_DIRECTORY)
-            .map_err(from_vfs)?;
-
-        match new_dir.metadata().unwrap().file_type {
+        let new_dir = self.task.fd_open(AT_CWD, path, OpenFlags::O_RDONLY)?;
+        match new_dir.file_type()? {
             fs::FileType::Directory => {
-                self.task.pcb.lock().curr_dir = new_dir;
+                self.task.pcb.lock().curr_dir = Arc::new(new_dir);
                 Ok(0)
             }
             _ => Err(Errno::ENOTDIR),
@@ -356,7 +47,7 @@ impl UserTaskContainer {
         debug!("sys_getcwd @ buffer_ptr{} size: {}", buf_ptr, size);
         let buffer = buf_ptr.slice_mut_with_len(size);
         let curr_path = self.task.pcb.lock().curr_dir.clone();
-        let path = curr_path.path().map_err(from_vfs)?;
+        let path = curr_path.path();
         let bytes = path.as_bytes();
         let len = cmp::min(bytes.len(), size);
         buffer[..len].copy_from_slice(&bytes[..len]);
@@ -408,8 +99,15 @@ impl UserTaskContainer {
             self.task.exit(0);
             return Ok(0);
         }
-        let _exec_file = FileItem::fs_open(filename, OpenFlags::O_RDONLY).map_err(from_vfs)?;
-        exec_with_process(self.task.clone(), filename.to_string(), args, envp).await?;
+        let curr_dir = self.task.pcb.lock().curr_dir.clone();
+        exec_with_process(
+            self.task.clone(),
+            Some(curr_dir),
+            filename.to_string(),
+            args,
+            envp,
+        )
+        .await?;
         self.task.before_run();
         Ok(0)
     }
@@ -701,7 +399,7 @@ impl UserTaskContainer {
 
         match child {
             Some(child) => {
-                let target_signal = SignalFlags::from_usize(signum);
+                let target_signal = SignalFlags::from_num(signum);
                 let child_task = child.upgrade().unwrap();
                 let mut child_tcb = child_task.tcb.write();
                 if !child_tcb.signal.has_sig(target_signal.clone()) {
@@ -734,8 +432,8 @@ impl UserTaskContainer {
         let rusage = usage_ptr.get_mut();
 
         let tms = self.task.inner_map(|inner| inner.tms);
-        let stime = Time::from_raw(tms.stime as _);
-        let utime = Time::from_raw(tms.utime as _);
+        let stime = Time::new(tms.stime as _);
+        let utime = Time::new(tms.utime as _);
         rusage.ru_stime = TimeVal {
             sec: stime.to_usec() / 1000_000,
             usec: stime.to_usec() % 1000_000,
@@ -759,7 +457,7 @@ impl UserTaskContainer {
     }
 
     pub async fn sys_kill(&self, pid: usize, signum: usize) -> SysResult {
-        let signal = SignalFlags::from_usize(signum);
+        let signal = SignalFlags::from_num(signum);
         debug!(
             "[task {}] sys_kill @ pid: {}, signum: {:?}",
             self.tid, pid, signal

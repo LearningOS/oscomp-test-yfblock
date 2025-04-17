@@ -1,6 +1,4 @@
-pub mod consts;
 mod fd;
-mod func;
 mod mm;
 mod shm;
 mod signal;
@@ -8,12 +6,14 @@ mod socket;
 mod sys;
 mod task;
 mod time;
+pub mod types;
 
+use fs::OpenFlags;
 pub use socket::NET_SERVER;
 use syscalls::{Errno, Sysno};
-pub use task::exec_with_process;
 
 use log::warn;
+use types::fd::AT_CWD;
 
 use crate::user::UserTaskContainer;
 
@@ -370,8 +370,24 @@ impl UserTaskContainer {
             }
             Sysno::setgroups => Ok(0),
             Sysno::renameat2 => {
-                self.sys_renameat2(args[0], args[1].into(), args[2], args[3].into(), args[4])
-                    .await
+                self.sys_renameat2(
+                    args[0] as _,
+                    args[1].into(),
+                    args[2] as _,
+                    args[3].into(),
+                    args[4],
+                )
+                .await
+            }
+            Sysno::renameat => {
+                self.sys_renameat2(
+                    args[0] as _,
+                    args[1].into(),
+                    args[2] as _,
+                    args[3].into(),
+                    OpenFlags::O_RDWR.bits(),
+                )
+                .await
             }
             #[cfg(not(any(target_arch = "x86_64")))]
             Sysno::clone => {
@@ -392,6 +408,17 @@ impl UserTaskContainer {
                     args[2].into(),
                     args[4] as _,
                     args[3].into(),
+                )
+                .await
+            }
+            #[cfg(target_arch = "x86_64")]
+            Sysno::rename => {
+                self.sys_renameat2(
+                    AT_CWD,
+                    args[0].into(),
+                    AT_CWD,
+                    args[1].into(),
+                    OpenFlags::O_RDWR.bits(),
                 )
                 .await
             }
@@ -422,7 +449,7 @@ impl UserTaskContainer {
             #[cfg(target_arch = "x86_64")]
             Sysno::pipe => self.sys_pipe2(args[0].into(), 0).await,
             #[cfg(target_arch = "x86_64")]
-            Sysno::unlink => self.sys_unlink(args[0].into()).await,
+            Sysno::unlink | Sysno::rmdir => self.sys_unlink(args[0].into()).await,
             #[cfg(target_arch = "x86_64")]
             Sysno::poll => self.sys_poll(args[0].into(), args[1], args[2] as _).await,
             #[cfg(target_arch = "x86_64")]
@@ -431,6 +458,8 @@ impl UserTaskContainer {
             Sysno::lstat => self.sys_lstat(args[0].into(), args[1].into()).await,
             #[cfg(target_arch = "x86_64")]
             Sysno::dup2 => self.sys_dup2(args[0], args[1]).await,
+            #[cfg(target_arch = "x86_64")]
+            Sysno::sync | Sysno::access => Ok(0),
             _ => {
                 warn!("unsupported syscall: {}", call_id);
                 Err(Errno::EPERM)

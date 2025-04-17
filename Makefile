@@ -2,7 +2,6 @@ SHELL := /bin/bash
 include scripts/config.mk
 export BOARD := qemu
 export ROOT_MANIFEST_DIR := $(shell pwd)
-export LOG  := error
 SMP := 1
 NVME := off
 NET  := off
@@ -36,8 +35,10 @@ FS_IMG  := mount.img
 features:= 
 QEMU_EXEC += -m 1G\
 			-nographic \
-			-smp $(SMP) \
-			-D qemu.log -d in_asm,int,pcall,cpu_reset,guest_errors
+			-smp $(SMP)
+ifeq ($(QEMU_LOG), on)
+QEMU_EXEC += -D qemu.log -d in_asm,int,pcall,cpu_reset,guest_errors
+endif
 
 TESTCASE := testcase-$(ARCH)
 ifeq ($(NVME), on)
@@ -70,7 +71,7 @@ fs-img:
 	@echo "TESTCASE: $(TESTCASE)"
 	@echo "ROOT_FS: $(ROOT_FS)"
 	rm -f $(FS_IMG)
-	dd if=/dev/zero of=$(FS_IMG) bs=1M count=64
+	dd if=/dev/zero of=$(FS_IMG) bs=1M count=96
 	sync
 ifeq ($(ROOT_FS), fat32)
 	mkfs.vfat -F 32 $(FS_IMG)
@@ -91,7 +92,7 @@ endif
 	sudo umount $(FS_IMG)
 
 build:
-	kbuild build byteos.yaml $(PLATFORM)
+	cargo build --target $(TARGET) --features "$(features)" --release
 	rust-objcopy --binary-architecture=$(ARCH) $(KERNEL_ELF) --strip-all -O binary $(KERNEL_BIN)
 
 justbuild: fs-img build 

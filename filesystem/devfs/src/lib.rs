@@ -4,7 +4,8 @@ extern crate alloc;
 extern crate log;
 
 use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
-use vfscore::{DirEntry, FileSystem, FileType, INodeInterface, StatMode, VfsError, VfsResult};
+use syscalls::Errno;
+use vfscore::{DirEntry, FileSystem, FileType, INodeInterface, StatMode, VfsResult};
 
 mod cpu_dma_latency;
 mod null;
@@ -79,12 +80,12 @@ impl DevDir {
 }
 
 impl INodeInterface for DevDirContainer {
-    fn open(&self, name: &str, _flags: vfscore::OpenFlags) -> VfsResult<Arc<dyn INodeInterface>> {
+    fn lookup(&self, name: &str) -> VfsResult<Arc<dyn INodeInterface>> {
         self.inner
             .map
             .get(name)
             .map(|x| x.clone())
-            .ok_or(VfsError::FileNotFound)
+            .ok_or(Errno::ENOENT)
     }
 
     fn read_dir(&self) -> VfsResult<Vec<DirEntry>> {
@@ -112,15 +113,5 @@ impl INodeInterface for DevDirContainer {
         stat.blocks = 0;
         stat.rdev = 0; // TODO: add device id
         Ok(())
-    }
-
-    fn metadata(&self) -> VfsResult<vfscore::Metadata> {
-        Ok(vfscore::Metadata {
-            filename: "dev",
-            inode: 0,
-            file_type: FileType::Directory,
-            size: 0,
-            childrens: self.inner.map.len(),
-        })
     }
 }

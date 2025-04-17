@@ -1,12 +1,8 @@
 use super::SysResult;
-use crate::syscall::consts::from_vfs;
-use crate::syscall::consts::MSyncFlags;
-use crate::syscall::consts::MapFlags;
-use crate::syscall::consts::MmapProt;
-use crate::syscall::consts::ProtFlags;
-use crate::syscall::consts::UserRef;
+use crate::syscall::types::mm::{MSyncFlags, MapFlags, MmapProt, ProtFlags};
 use crate::tasks::{MemArea, MemType};
 use crate::user::UserTaskContainer;
+use crate::utils::useref::UserRef;
 use devices::PAGE_SIZE;
 use log::debug;
 use polyhal::VirtAddr;
@@ -17,13 +13,11 @@ use syscalls::Errno;
 const MAP_AREA_START: usize = 0x2_0000_0000;
 
 impl UserTaskContainer {
-    pub async fn sys_brk(&self, addr: isize) -> SysResult {
-        debug!("sys_brk @ increment: {:#x}", addr);
-        if addr == 0 {
-            Ok(self.task.heap())
-        } else {
-            debug!("alloc pos: {}", addr - self.task.heap() as isize);
-            Ok(self.task.sbrk(addr - self.task.heap() as isize))
+    pub async fn sys_brk(&self, addr: usize) -> SysResult {
+        debug!("sys_brk @ new: {:#x} old: {:#x}", addr, self.task.heap());
+        match addr {
+            0 => Ok(self.task.heap()),
+            _ => Ok(self.task.sbrk(addr)),
         }
     }
 
@@ -129,7 +123,7 @@ impl UserTaskContainer {
 
         if let Some(file) = file {
             let buffer = UserRef::<u8>::from(addr).slice_mut_with_len(len);
-            file.readat(off, buffer).map_err(from_vfs)?;
+            file.readat(off, buffer)?;
         }
         Ok(addr.into())
     }

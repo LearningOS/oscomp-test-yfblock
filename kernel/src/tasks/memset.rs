@@ -5,7 +5,7 @@ use core::{
     ops::{Deref, DerefMut},
 };
 use devices::PAGE_SIZE;
-use fs::File;
+use fs::INodeInterface;
 use polyhal::{PageTable, VirtAddr};
 use runtime::frame::FrameTracker;
 
@@ -85,7 +85,7 @@ impl Debug for MapTrack {
 pub struct MemArea {
     pub mtype: MemType,
     pub mtrackers: Vec<MapTrack>,
-    pub file: Option<File>,
+    pub file: Option<Arc<dyn INodeInterface>>,
     pub offset: usize,
     pub start: usize,
     pub len: usize,
@@ -166,9 +166,7 @@ impl MemArea {
                 self.mtrackers
                     .iter()
                     .filter(|x| jrange.contains(&x.vaddr.raw()))
-                    .for_each(|x| {
-                        self.write_page(x);
-                    });
+                    .for_each(|x| self.write_page(x));
             };
             self.mtrackers.retain(|x| {
                 pt.unmap_page(x.vaddr);
@@ -188,17 +186,13 @@ impl MemArea {
             self.mtrackers
                 .iter()
                 .filter(|x| jrange.contains(&x.vaddr.raw()))
-                .for_each(|x| {
-                    self.write_page(x);
-                });
+                .for_each(|x| self.write_page(x));
         };
         // drop the sub memory area pages.
         let new_self_rang = self.start..self.start + self.len;
         self.mtrackers
             .extract_if(|x| !new_self_rang.contains(&x.vaddr.raw()))
-            .for_each(|x| {
-                pt.unmap_page(x.vaddr);
-            });
+            .for_each(|x| pt.unmap_page(x.vaddr));
         None
     }
 

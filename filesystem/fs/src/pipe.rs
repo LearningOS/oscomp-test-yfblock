@@ -5,16 +5,18 @@ use alloc::{
     sync::{Arc, Weak},
 };
 use sync::Mutex;
-use vfscore::{INodeInterface, PollEvent, VfsResult};
+use syscalls::Errno;
+use vfscore::{INodeInterface, PollEvent, StatMode, VfsResult};
 
 // pipe sender, just can write.
 pub struct PipeSender(Arc<Mutex<VecDeque<u8>>>);
 
 impl INodeInterface for PipeSender {
     fn writeat(&self, _offset: usize, buffer: &[u8]) -> VfsResult<usize> {
+        log::warn!("write pipe:");
         let mut queue = self.0.lock();
         if queue.len() > 0x50000 {
-            Err(vfscore::VfsError::Blocking)
+            Err(Errno::EWOULDBLOCK)
         } else {
             let wlen = buffer.len();
             queue.extend(buffer.iter());
@@ -30,6 +32,11 @@ impl INodeInterface for PipeSender {
             }
         }
         Ok(res)
+    }
+
+    fn stat(&self, stat: &mut vfscore::Stat) -> VfsResult<()> {
+        stat.mode = StatMode::FIFO;
+        Ok(())
     }
 }
 
@@ -51,7 +58,7 @@ impl INodeInterface for PipeReceiver {
                 buffer[i] = x;
             });
         if rlen == 0 && Weak::strong_count(&self.sender) > 0 {
-            Err(vfscore::VfsError::Blocking)
+            Err(Errno::EWOULDBLOCK)
         } else {
             Ok(rlen)
         }
@@ -72,6 +79,11 @@ impl INodeInterface for PipeReceiver {
             }
         }
         Ok(res)
+    }
+
+    fn stat(&self, stat: &mut vfscore::Stat) -> VfsResult<()> {
+        stat.mode = StatMode::FIFO;
+        Ok(())
     }
 }
 

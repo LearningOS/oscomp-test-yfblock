@@ -3,9 +3,9 @@ use log::debug;
 use signal::{SigAction, SigMaskHow, SigProcMask, SignalFlags};
 use syscalls::Errno;
 
-use crate::{tasks::WaitSignal, user::UserTaskContainer};
+use crate::{tasks::WaitSignal, user::UserTaskContainer, utils::useref::UserRef};
 
-use super::{consts::UserRef, SysResult};
+use super::SysResult;
 
 /*
  * 忽略信号：不采取任何操作、有两个信号不能被忽略：SIGKILL和SIGSTOP。
@@ -102,7 +102,7 @@ impl UserTaskContainer {
         act: UserRef<SigAction>,
         oldact: UserRef<SigAction>,
     ) -> SysResult {
-        let signal = SignalFlags::from_usize(sig);
+        let signal = SignalFlags::from_num(sig);
         debug!(
             "sys_sigaction @ sig: {:?}, act: {}, oldact: {}",
             signal, act, oldact
